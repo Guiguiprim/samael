@@ -11,7 +11,7 @@ use chrono::Duration;
 use flate2::{write::DeflateEncoder, Compression};
 use openssl::pkey::Private;
 use openssl::{rsa, x509};
-use snafu::Snafu;
+use snafu::{ResultExt, Snafu};
 use std::fmt::Debug;
 use std::io::Write;
 use url::Url;
@@ -92,7 +92,9 @@ pub enum Error {
     #[snafu(display("Signed SAML Assertions are not yet supported"))]
     SignedAssertionsNotYetSupported,
     #[snafu(display("SAML Response and all assertions must be signed"))]
-    FailedToValidateSignature,
+    FailedToValidateSignature {
+        source: Box<dyn std::error::Error>,
+    },
     #[snafu(display("Failed to deserialize SAML response."))]
     DeserializeResponseError,
     #[snafu(display("Failed to parse cert '{}'. Assumed DER format.", cert))]
@@ -374,10 +376,9 @@ impl ServiceProvider {
         possible_request_ids: &[AsStr],
     ) -> Result<Assertion, Error> {
         let reduced_xml = if let Some(sign_certs) = self.idp_signing_certs()? {
-            reduce_xml_to_signed(
-                response_xml,
-                &sign_certs,
-            ).map_err(|_e| Error::FailedToValidateSignature)?
+            reduce_xml_to_signed(response_xml, &sign_certs)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                .context(FailedToValidateSignature)?
         } else {
             String::from(response_xml)
         };
